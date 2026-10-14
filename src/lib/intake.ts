@@ -75,7 +75,7 @@ export function fallbackDraft(email: IntakeEmail): IntakeDraft {
     title: email.subject.trim().slice(0, 120) || "Repair request from email",
     address: "",
     priority: safetyReasons.length ? "Urgent" : "Medium",
-    summary: email.body.trim().slice(0, 400),
+    summary: email.body.replace(/\s+/g, " ").trim().slice(0, 400),
     nextAction: safetyReasons.length
       ? "Call the tenant now and arrange an emergency trade"
       : "Review the email and assign a trade",

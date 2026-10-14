@@ -52,7 +52,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           priority,
           column: "New",
           status: "Awaiting triage",
-          waitingOn: "Sarah (PM)",
+          waitingOn: "Property Manager",
           nextAction: "Review request & assign trade",
           waiting: "Just now",
           lastUpdate: "Just now",

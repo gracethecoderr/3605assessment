@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RequestCard } from "@/components/RequestCard";
-import { columns, priorityTone, type Priority } from "@/lib/data";
+import { columns, priorityTone, type Priority, type RepairRequest } from "@/lib/data";
 import { useWorkspace } from "@/lib/workspace";
 import { useAuth } from "@/lib/auth";
 
@@ -29,14 +29,26 @@ export const Route = createFileRoute("/")({
   }),
   component: Dashboard,
 });
-const briefing = [
-  { id: "REQ-087", t: "Garage Door", why: "Waiting for landlord approval for 2 days" },
-  { id: "REQ-093", t: "Water Leak", why: "Tenant has provided requested photos; PM review needed" },
-  { id: "REQ-106", t: "Electrical Issue", why: "Electrician cancelled today's appointment" },
-];
+const priorityRank = { Urgent: 0, High: 1, Medium: 2, Low: 3 } as const;
+
+/** The open requests most worth the property manager's attention, most pressing first. */
+function pickBriefing(requests: RepairRequest[]) {
+  const score = (r: RepairRequest) =>
+    priorityRank[r.priority] * 2 + (r.column === "Action Needed" ? 0 : 1);
+  return requests
+    .filter(
+      (r) =>
+        r.column !== "Completed" &&
+        r.column !== "Scheduled" &&
+        (r.priority === "Urgent" || r.priority === "High" || r.column === "Action Needed"),
+    )
+    .sort((a, b) => score(a) - score(b))
+    .slice(0, 3);
+}
 
 function Dashboard() {
   const { requests, addRequest, notify } = useWorkspace();
+  const briefing = useMemo(() => pickBriefing(requests), [requests]);
   const { user } = useAuth();
   const navigate = useNavigate();
   const [view, setView] = useState<"board" | "list">("board");
@@ -94,7 +106,7 @@ function Dashboard() {
   ];
   return (
     <AppShell openAssistantSignal={aiSeed}>
-      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 p-4 pb-24 sm:p-6 sm:pb-24 lg:p-8 lg:pb-24">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <p className="text-sm text-muted-foreground">{dateStr}</p>
@@ -136,7 +148,11 @@ function Dashboard() {
                 <div className="text-xs font-medium uppercase tracking-wide text-ai">
                   Morning briefing
                 </div>
-                <h2 className="font-semibold">3 requests need your attention</h2>
+                <h2 className="font-semibold">
+                  {briefing.length === 0
+                    ? "Nothing urgent right now"
+                    : `${briefing.length} ${briefing.length === 1 ? "request needs" : "requests need"} your attention`}
+                </h2>
               </div>
             </div>
             <button
@@ -146,22 +162,32 @@ function Dashboard() {
               Ask AI to prioritise my day
             </button>
           </div>
-          <div className="mt-4 divide-y rounded-md border">
-            {briefing.map((b) => (
-              <Link
-                key={b.id}
-                to="/requests/$id"
-                params={{ id: b.id }}
-                className="flex items-center gap-3 px-3 py-3 text-sm hover:bg-muted"
-              >
-                <span className="h-2 w-2 shrink-0 rounded-full bg-attention" />
-                <span className="font-mono text-xs text-muted-foreground">{b.id}</span>
-                <span className="hidden w-36 font-medium sm:block">{b.t}</span>
-                <span className="min-w-0 flex-1 truncate text-muted-foreground">{b.why}</span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </Link>
-            ))}
-          </div>
+          {briefing.length > 0 ? (
+            <div className="mt-4 divide-y rounded-md border">
+              {briefing.map((b) => (
+                <Link
+                  key={b.id}
+                  to="/requests/$id"
+                  params={{ id: b.id }}
+                  className="flex items-center gap-3 px-3 py-3 text-sm hover:bg-muted"
+                >
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${b.priority === "Urgent" ? "bg-destructive" : "bg-attention"}`}
+                  />
+                  <span className="font-mono text-xs text-muted-foreground">{b.id}</span>
+                  <span className="hidden w-56 truncate font-medium sm:block">{b.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {b.status} · {b.nextAction}
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-muted-foreground">
+              No urgent or high-priority requests are waiting on you.
+            </p>
+          )}
         </section>
         <section>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

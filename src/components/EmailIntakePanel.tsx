@@ -191,10 +191,11 @@ export function EmailIntakePanel({ email }: { email: IntakeEmail }) {
         </label>
         <label className={label}>
           Next action
-          <input
+          <textarea
             value={draft.nextAction}
             onChange={(e) => set("nextAction", e.target.value)}
-            className={field}
+            rows={2}
+            className={`${field} resize-none`}
           />
         </label>
         <label className={label}>

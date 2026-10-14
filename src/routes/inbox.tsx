@@ -7,7 +7,6 @@ import {
   Users,
   MessageCircle,
   Bot,
-  Check,
   Reply,
   Search,
   X,
@@ -60,7 +59,7 @@ const seedMessages = [
     ch: "SMS",
     subj: "Inspection access",
     prev: "Thursday after 2pm works for me",
-    body: "Hi Sarah, Thursday after 2pm works for me. Please let the inspector know to buzz Unit 2.",
+    body: "Hi, Thursday after 2pm works for me. Please let the inspector know to buzz Unit 2.",
     req: "REQ-099",
     time: "7:48 AM",
     unread: true,
@@ -447,7 +446,7 @@ function InboxPage() {
                 )}
               </div>
             </div>
-            <aside className="w-full shrink-0 border-l bg-card p-5 xl:w-96">
+            <aside className="w-full shrink-0 border-l bg-card p-5 pb-24 xl:w-96">
               {selected.gmail ? (
                 <>
                   <div className="flex items-center gap-2">
@@ -477,7 +476,7 @@ function InboxPage() {
                     <div className="grid h-7 w-7 place-items-center rounded-md bg-ai-soft text-ai">
                       <Bot className="h-4 w-4" />
                     </div>
-                    <span className="text-sm font-semibold">Banjg AI detected:</span>
+                    <span className="text-sm font-semibold">Suggested actions</span>
                   </div>
                   <div className="mt-4 space-y-3 text-sm">
                     <div>
@@ -490,17 +489,10 @@ function InboxPage() {
                         {selected.req} — {selected.subj}
                       </Link>
                     </div>
-                    <div>
-                      <div className="text-xs text-muted-foreground">Detected intent</div>
-                      <span className="inline-flex items-center gap-1 rounded bg-done-soft px-2 py-0.5 font-medium text-done">
-                        <Check className="h-3.5 w-3.5" />
-                        Actionable update received
-                      </span>
-                    </div>
                   </div>
                   <div className="mt-5">
                     <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Suggested workflow actions
+                      Next steps
                     </div>
                     <div className="space-y-2">
                       {actions.map((a, i) => (
@@ -510,7 +502,7 @@ function InboxPage() {
                         >
                           <input
                             type="checkbox"
-                            checked={checked[i]}
+                            checked={checked[i] ?? false}
                             disabled={approved}
                             onChange={() =>
                               setChecked((items) => items.map((v, j) => (j === i ? !v : v)))
@@ -639,7 +631,7 @@ function PasteEmail({
           </label>
         </div>
       </div>
-      <aside className="w-full shrink-0 border-l bg-card p-5 xl:w-96">
+      <aside className="w-full shrink-0 border-l bg-card p-5 pb-24 xl:w-96">
         {paste.body.trim() ? (
           <EmailIntakePanel email={paste} />
         ) : (
