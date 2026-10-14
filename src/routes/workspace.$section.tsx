@@ -32,6 +32,19 @@ const integrations = [
   ["AppFolio / Buildium", "Property management", "Not connected"],
 ];
 
+const subtitles: Record<string, string> = {
+  properties: "Every managed property, with its tenant and landlord.",
+  contacts: "Tenants, landlords and trades you work with.",
+  calendar: "Booked inspections and trade visits.",
+  analytics: "How repair requests are tracking across your portfolio.",
+  settings: "Connected channels and integrations.",
+};
+
+const listHeaders: Record<string, string[]> = {
+  properties: ["Property", "Tenant", "Landlord", "Status"],
+  contacts: ["Name", "Role", "Details", "Channels"],
+};
+
 function title(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -44,7 +57,7 @@ function WorkspaceSection() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{title(section)}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage your connected property workspace.
+            {subtitles[section] ?? "Manage your property workspace."}
           </p>
         </div>
         {section === "properties" || section === "contacts" ? (
@@ -80,10 +93,17 @@ function PropertiesOrContacts({ section }: { section: string }) {
         />
       </div>
       <div className="overflow-hidden rounded-lg border bg-card shadow-card">
+        <div className="hidden gap-2 border-b bg-muted px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:grid sm:grid-cols-[1.5fr_1fr_1fr_9rem]">
+          {(listHeaders[section] ?? []).map((h, i) => (
+            <div key={h} className={i === 3 ? "text-right" : i === 0 ? "pl-7" : ""}>
+              {h}
+            </div>
+          ))}
+        </div>
         {filtered.map((row) => (
           <div
             key={row[0]}
-            className="grid gap-2 border-b p-4 last:border-0 sm:grid-cols-[1.5fr_1fr_1fr_auto] sm:items-center"
+            className="grid gap-2 border-b p-4 last:border-0 sm:grid-cols-[1.5fr_1fr_1fr_9rem] sm:items-center"
           >
             <div className="flex items-center gap-3 font-medium">
               {section === "contacts" ? (
@@ -93,8 +113,11 @@ function PropertiesOrContacts({ section }: { section: string }) {
               )}
               {row[0]}
             </div>
-            {row.slice(1).map((cell) => (
-              <div key={cell} className="text-sm text-muted-foreground">
+            {row.slice(1).map((cell, i) => (
+              <div
+                key={cell}
+                className={`text-sm text-muted-foreground ${i === 2 ? "sm:text-right" : ""}`}
+              >
                 {cell}
               </div>
             ))}
@@ -136,7 +159,12 @@ function AnalyticsSection() {
         ["Open requests", requests.filter((r) => r.column !== "Completed").length],
         ["Urgent", requests.filter((r) => r.priority === "Urgent").length],
         ["Scheduled", requests.filter((r) => r.column === "Scheduled").length],
-        ["Completion rate", "91%"],
+        [
+          "Completion rate",
+          requests.length
+            ? `${Math.round((requests.filter((r) => r.column === "Completed").length / requests.length) * 100)}%`
+            : "—",
+        ],
       ].map(([label, value]) => (
         <div key={label as string} className="rounded-lg border bg-card p-5 shadow-card">
           <div className="text-sm text-muted-foreground">{label}</div>
