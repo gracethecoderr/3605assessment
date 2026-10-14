@@ -285,6 +285,22 @@ Each repair request is an "incident". The Dashboard shows all of them (Board vie
 
 ---
 
+## 7.7. AI email intake (email → reviewed repair request)
+
+In the Inbox, selecting a Gmail email (or clicking **Paste an email**) shows the **AI intake** panel:
+
+1. **Draft repair request with AI**: DeepSeek reads the email (`analyseEmail` in `src/lib/intake.functions.ts`) and drafts the issue, address, priority, summary, next action, who we are waiting on, the sender's role, and a list of information still missing. Nothing is written yet.
+2. **Safety check**: a keyword safety net (`detectSafetyRisks` in `src/lib/intake.ts`, based on NSW Fair Trading urgent-repair categories: gas, dangerous electrical faults, fire/smoke alarms, flooding, essential services, structural damage, security) runs alongside the AI. If either flags a risk, the request is forced to **Urgent**, the next action becomes "call the tenant now", and the property manager must tick "I'll handle it personally" before saving. Nothing is automated for safety issues.
+3. **Review**: every field is editable. **Approve & create request** (`createRequestFromEmail`) saves the request, puts it in the right column (Action Needed for safety, Waiting if information is missing, otherwise New), adds the sender as a participant, links the email (and earlier unlinked emails from the same person), and writes timeline events: created (noting AI drafted / PM approved), AI summary, safety flag, still-needed list, and for pasted emails the original email text.
+
+**Paste an email** works without Gmail and includes three example emails (gas smell, oven, missing address) for demos and user testing.
+
+If `DEEPSEEK_API_KEY` is missing or the AI fails, the panel still works: it shows a notice, keeps the keyword safety check, and the property manager fills in the rest.
+
+Tests: `src/test/intake.test.ts` (safety rules and fallback draft).
+
+---
+
 ## 8. Completed fixes and iterations
 
 ### Round 1: 9 bug fixes

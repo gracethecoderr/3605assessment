@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,12 +13,14 @@ import {
   X,
   Send,
   ArrowLeft,
+  ClipboardPaste,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useAuth } from "@/lib/auth";
 import { useWorkspace } from "@/lib/workspace";
 import { disconnectGmail, getInbox, syncGmail, type InboxEmail } from "@/lib/gmail.functions";
-import { linkEmail } from "@/lib/incidents.functions";
+import { EmailIntakePanel } from "@/components/EmailIntakePanel";
+import { sampleEmails, type IntakeEmail } from "@/lib/intake";
 
 export const Route = createFileRoute("/inbox")({
   head: () => ({
@@ -180,9 +182,9 @@ function InboxPage() {
   const [replying, setReplying] = useState(false);
   const [reply, setReply] = useState("");
   const [syncing, setSyncing] = useState(false);
-  const { addRequest, updateRequest, notify } = useWorkspace();
+  const [paste, setPaste] = useState<IntakeEmail | null>(null);
+  const { updateRequest, notify } = useWorkspace();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const inbox = useQuery({ queryKey: ["inbox"], queryFn: () => getInbox(), staleTime: Infinity });
   const connected = inbox.data?.connected === true;
   const messages = useMemo<Msg[]>(
@@ -246,6 +248,7 @@ function InboxPage() {
     [messages, ch, query],
   );
   const choose = (id: string) => {
+    setPaste(null);
     setSelectedId(id);
     setApproved(false);
     if (connected) setReadIds((ids) => new Set(ids).add(id));
@@ -263,10 +266,21 @@ function InboxPage() {
     <AppShell>
       <div className="flex h-full min-h-[calc(100vh-3.5rem)] flex-col xl:flex-row">
         <div
-          className={`${selected ? "hidden xl:flex" : "flex"} w-full shrink-0 flex-col border-r bg-card xl:flex xl:w-80`}
+          className={`${selected || paste ? "hidden xl:flex" : "flex"} w-full shrink-0 flex-col border-r bg-card xl:flex xl:w-80`}
         >
           <div className="border-b p-3">
-            <h1 className="mb-2 font-semibold">Unified Inbox</h1>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h1 className="font-semibold">Unified Inbox</h1>
+              <button
+                onClick={() =>
+                  setPaste({ emailId: null, fromName: "", fromEmail: "", subject: "", body: "" })
+                }
+                className="flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                <ClipboardPaste className="h-3.5 w-3.5" />
+                Paste an email
+              </button>
+            </div>
             {inbox.isSuccess ? (
               connected ? (
                 <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-muted px-2 py-1.5 text-[11px] text-muted-foreground">
@@ -349,7 +363,9 @@ function InboxPage() {
             ) : null}
           </div>
         </div>
-        {selected ? (
+        {paste ? (
+          <PasteEmail paste={paste} setPaste={setPaste} />
+        ) : selected ? (
           <>
             <div className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
               <button
@@ -440,24 +456,17 @@ function InboxPage() {
                     </div>
                     <span className="text-sm font-semibold">From your Gmail inbox</span>
                   </div>
-                  <p className="mt-4 text-sm text-muted-foreground">
-                    This email is not linked to a repair request yet.
-                  </p>
-                  <button
-                    onClick={() => {
-                      const created = addRequest({
-                        title: selected.subj.slice(0, 200),
-                        address: "Address to be confirmed",
-                        priority: "Medium",
-                      });
-                      notify(`${created.id} created from email`);
-                      void linkEmail({ data: { emailId: selected.id, requestId: created.id } });
-                      void navigate({ to: "/requests/$id", params: { id: created.id } });
-                    }}
-                    className="mt-4 w-full rounded-md bg-primary py-2.5 text-sm font-medium text-primary-foreground"
-                  >
-                    Create repair request from this email
-                  </button>
+                  <div className="mt-5 border-t pt-5">
+                    <EmailIntakePanel
+                      email={{
+                        emailId: selected.id,
+                        fromName: selected.from,
+                        fromEmail: selected.gmail.fromEmail,
+                        subject: selected.subj,
+                        body: selected.body,
+                      }}
+                    />
+                  </div>
                   <p className="mt-3 text-xs text-muted-foreground">
                     Gmail access is read-only. Nothing is sent or changed in your mailbox.
                   </p>
@@ -552,5 +561,93 @@ function InboxPage() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+const pasteField =
+  "mt-1 w-full rounded-md border bg-card px-3 py-2 text-sm outline-none focus:border-ring";
+
+/** Paste any email (or load a sample) and run it through AI intake — works without Gmail. */
+function PasteEmail({
+  paste,
+  setPaste,
+}: {
+  paste: IntakeEmail;
+  setPaste: (e: IntakeEmail | null) => void;
+}) {
+  const update = (k: keyof IntakeEmail, v: string) => setPaste({ ...paste, [k]: v });
+  return (
+    <>
+      <div className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
+        <button
+          onClick={() => setPaste(null)}
+          className="mb-3 flex items-center gap-1 text-sm text-muted-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to messages
+        </button>
+        <div className="rounded-lg border bg-card p-5 shadow-card sm:p-6">
+          <h2 className="text-xl font-semibold">Paste an email</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Paste a maintenance email from any inbox, or load an example, then let Banjg AI draft
+            the request.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {sampleEmails.map(({ label, ...sample }) => (
+              <button
+                key={label}
+                onClick={() => setPaste(sample)}
+                className="rounded-md bg-muted px-2.5 py-1 text-xs hover:bg-primary-soft"
+              >
+                Example: {label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              Sender name
+              <input
+                value={paste.fromName}
+                onChange={(e) => update("fromName", e.target.value)}
+                className={pasteField}
+              />
+            </label>
+            <label className="text-xs font-medium text-muted-foreground">
+              Sender email
+              <input
+                value={paste.fromEmail}
+                onChange={(e) => update("fromEmail", e.target.value)}
+                className={pasteField}
+              />
+            </label>
+          </div>
+          <label className="mt-3 block text-xs font-medium text-muted-foreground">
+            Subject
+            <input
+              value={paste.subject}
+              onChange={(e) => update("subject", e.target.value)}
+              className={pasteField}
+            />
+          </label>
+          <label className="mt-3 block text-xs font-medium text-muted-foreground">
+            Email text
+            <textarea
+              value={paste.body}
+              onChange={(e) => update("body", e.target.value)}
+              className={`${pasteField} min-h-48`}
+            />
+          </label>
+        </div>
+      </div>
+      <aside className="w-full shrink-0 border-l bg-card p-5 xl:w-96">
+        {paste.body.trim() ? (
+          <EmailIntakePanel email={paste} />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Paste the email text (or load an example) to draft a request.
+          </p>
+        )}
+      </aside>
+    </>
   );
 }
