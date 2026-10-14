@@ -81,8 +81,15 @@ export const listRequests = createServerFn({ method: "GET" }).handler(async () =
   if (existing.length > 0) return existing.map(toRequest);
 
   // First sign-in: give the account the demo board so it isn't empty.
+  // D1 allows at most 100 bound values per query, and each row has 17 columns,
+  // so insert in batches of 5 (85 values) instead of all rows at once.
   const rows = seedRequests.map((r, i) => toRow(userId, r, i + 1));
-  await db.insert(repairRequests).values(rows).onConflictDoNothing();
+  for (let i = 0; i < rows.length; i += 5) {
+    await db
+      .insert(repairRequests)
+      .values(rows.slice(i, i + 5))
+      .onConflictDoNothing();
+  }
   return seedRequests;
 });
 
