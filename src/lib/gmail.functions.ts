@@ -22,6 +22,10 @@ export type InboxEmail = {
   unread: boolean;
   requestId: string | null;
   threadId: string;
+  toEmails: string;
+  inInbox: boolean;
+  sent: boolean;
+  trashed: boolean;
 };
 
 export const getInbox = createServerFn({ method: "GET" }).handler(async () => {
@@ -35,21 +39,22 @@ export const getInbox = createServerFn({ method: "GET" }).handler(async () => {
     .from(emailMessages)
     .where(eq(emailMessages.userId, userId))
     .orderBy(desc(emailMessages.receivedAt));
-  const own = account.email.toLowerCase();
-  const emails: InboxEmail[] = rows
-    .filter((r) => r.fromEmail !== own)
-    .map((r) => ({
-      id: r.id,
-      fromName: r.fromName,
-      fromEmail: r.fromEmail,
-      subject: r.subject,
-      snippet: r.snippet,
-      body: r.body,
-      receivedAt: r.receivedAt,
-      unread: r.unread,
-      requestId: r.requestId,
-      threadId: r.threadId,
-    }));
+  const emails: InboxEmail[] = rows.map((r) => ({
+    id: r.id,
+    fromName: r.fromName,
+    fromEmail: r.fromEmail,
+    subject: r.subject,
+    snippet: r.snippet,
+    body: r.body,
+    receivedAt: r.receivedAt,
+    unread: r.unread,
+    requestId: r.requestId,
+    threadId: r.threadId,
+    toEmails: r.toEmails,
+    inInbox: r.inInbox,
+    sent: r.sent,
+    trashed: r.trashed,
+  }));
   return {
     connected: true as const,
     email: account.email,
@@ -57,6 +62,22 @@ export const getInbox = createServerFn({ method: "GET" }).handler(async () => {
     emails,
   };
 });
+
+export const moveEmail = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1).max(200), trash: z.boolean() }))
+  .handler(async ({ data }) => {
+    const userId = await requireUserId();
+    const gmail = await import("./gmail.server");
+    try {
+      await gmail.moveMail(userId, getRequestUrl().origin, data.id, data.trash);
+      return { ok: true as const };
+    } catch (error) {
+      if (error instanceof gmail.ReconnectRequired)
+        return { ok: false as const, code: "RECONNECT" as const };
+      console.error("Gmail move failed", error);
+      return { ok: false as const, code: "ERROR" as const };
+    }
+  });
 
 export const syncGmail = createServerFn({ method: "POST" }).handler(async () => {
   const userId = await requireUserId();

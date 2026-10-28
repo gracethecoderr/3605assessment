@@ -13,6 +13,8 @@ Open the deployed demo at [banjg-property.86yixuanchen.workers.dev](https://banj
 
 The demo account contains fictional repair requests, contacts, emails, quotes, appointments and AI summaries. Its Gmail connection is simulated, so no real email is sent. This is a shared Clerk development-mode account with a fixed test code; use it only for demonstrations and do not enter real or sensitive information.
 
+The Unified Inbox includes Inbox, Sent, Trash, a new-email composer, replies, and repair-request linking. Deleting moves mail to Gmail Trash; Restore returns it without permanently deleting it. Existing users must reconnect Gmail to grant `gmail.modify` permission for moving mail. Declare this scope in Google Auth Platform → Data Access. Each sync fetches up to 100 messages from the last 30 days; this is not a full historical mailbox import. Demo mail actions remain simulated.
+
 ## Development
 
 Requires Node.js 20+ and npm.

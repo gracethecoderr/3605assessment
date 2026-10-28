@@ -68,7 +68,9 @@ export function AppShell({
     staleTime: Infinity,
     enabled: isSignedIn,
   });
-  const unreadCount = inbox?.connected ? inbox.emails.filter((m) => m.unread).length : 0;
+  const unreadCount = inbox?.connected
+    ? inbox.emails.filter((m) => m.unread && m.inInbox && !m.trashed).length
+    : 0;
   const navigate = useNavigate();
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);

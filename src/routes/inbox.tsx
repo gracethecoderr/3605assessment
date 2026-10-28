@@ -1,10 +1,20 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Inbox as InboxIcon, Mail, Reply, Search, Send } from "lucide-react";
+import {
+  ArrowLeft,
+  Inbox as InboxIcon,
+  Mail,
+  Reply,
+  Search,
+  Send,
+  Trash2,
+  PenSquare,
+  Undo2,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useWorkspace } from "@/lib/workspace";
-import { disconnectGmail, getInbox, sendEmail, syncGmail } from "@/lib/gmail.functions";
+import { disconnectGmail, getInbox, moveEmail, sendEmail, syncGmail } from "@/lib/gmail.functions";
 import { linkEmail } from "@/lib/incidents.functions";
 
 export const Route = createFileRoute("/inbox")({
@@ -35,6 +45,14 @@ function InboxPage() {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [folder, setFolder] = useState<"inbox" | "sent" | "trash">("inbox");
+  const [composing, setComposing] = useState(false);
+  const [to, setTo] = useState("");
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const [requestId, setRequestId] = useState("");
+  const [moving, setMoving] = useState(false);
+  const [reconnect, setReconnect] = useState(false);
   const { requests, addRequest, notify } = useWorkspace();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -51,7 +69,8 @@ function InboxPage() {
         await queryClient.invalidateQueries({ queryKey: ["inbox"] });
         notify(`Synced ${result.count} emails from Gmail`);
       } else if (result.code === "RECONNECT") {
-        notify("Gmail authorization expired. Please reconnect.");
+        setReconnect(true);
+        notify("Please reconnect Gmail to update mailbox permissions.");
       } else {
         notify("Gmail sync failed. Please try again.");
       }
@@ -84,18 +103,87 @@ function InboxPage() {
 
   const list = useMemo(() => {
     const q = query.toLowerCase();
-    return emails.filter((m) =>
-      [m.fromName, m.fromEmail, m.subject, m.snippet].some((v) => v.toLowerCase().includes(q)),
-    );
-  }, [emails, query]);
+    return emails
+      .filter((m) =>
+        folder === "trash" ? m.trashed : !m.trashed && (folder === "sent" ? m.sent : m.inInbox),
+      )
+      .filter((m) =>
+        [m.fromName, m.fromEmail, m.toEmails, m.subject, m.snippet].some((v) =>
+          v.toLowerCase().includes(q),
+        ),
+      );
+  }, [emails, query, folder]);
 
   const linkedRequest = selected?.requestId
     ? requests.find((r) => r.id === selected.requestId)
     : undefined;
 
   const choose = (id: string) => {
+    setComposing(false);
     setSelectedId(id);
     setReadIds((ids) => new Set(ids).add(id));
+  };
+
+  const moveSelected = async () => {
+    if (!selected || moving) return;
+    setMoving(true);
+    try {
+      const result = await moveEmail({ data: { id: selected.id, trash: !selected.trashed } });
+      if (result.ok) {
+        notify(selected.trashed ? "Email restored" : "Email moved to Trash");
+        setSelectedId("");
+        await refreshLinks();
+      } else {
+        if (result.code === "RECONNECT") setReconnect(true);
+        notify(
+          result.code === "RECONNECT"
+            ? "Reconnect Gmail to allow deleting and restoring emails."
+            : "Could not move email. Please try again.",
+        );
+      }
+    } catch {
+      notify("Could not move email. Please try again.");
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  const submitCompose = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (sending) return;
+    setSending(true);
+    try {
+      const result = await sendEmail({
+        data: {
+          to: to.trim(),
+          subject: subject.trim(),
+          body: body.trim(),
+          requestId: requestId || null,
+        },
+      });
+      if (result.ok) {
+        notify("Email sent");
+        setComposing(false);
+        setTo("");
+        setSubject("");
+        setBody("");
+        setRequestId("");
+        setFolder("sent");
+        setSelectedId("");
+        await refreshLinks();
+      } else {
+        if (result.code === "RECONNECT") setReconnect(true);
+        notify(
+          result.code === "RECONNECT"
+            ? "Reconnect Gmail before sending."
+            : "Could not send email. Your draft is still here.",
+        );
+      }
+    } catch {
+      notify("Could not send email. Your draft is still here.");
+    } finally {
+      setSending(false);
+    }
   };
 
   const submitReply = async (e: React.FormEvent) => {
@@ -141,6 +229,47 @@ function InboxPage() {
         >
           <div className="border-b p-3">
             <h1 className="mb-2 font-semibold">Unified Inbox</h1>
+            {connected ? (
+              <>
+                <button
+                  onClick={() => {
+                    setSelectedId("");
+                    setComposing(true);
+                  }}
+                  className="mb-3 flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
+                >
+                  <PenSquare className="h-4 w-4" />
+                  Compose
+                </button>
+                <nav aria-label="Mail folders" className="mb-3 flex gap-1">
+                  {(["inbox", "sent", "trash"] as const).map((value) => (
+                    <button
+                      key={value}
+                      aria-pressed={folder === value}
+                      onClick={() => {
+                        setFolder(value);
+                        setSelectedId("");
+                        setComposing(false);
+                      }}
+                      className={`flex-1 rounded-md px-2 py-2 text-xs capitalize ${folder === value ? "bg-primary-soft font-semibold text-primary" : "hover:bg-muted"}`}
+                    >
+                      {value === "sent" ? "Sent" : value === "trash" ? "Trash" : "Inbox"}
+                    </button>
+                  ))}
+                </nav>
+                <p className="mb-2 text-[11px] text-muted-foreground">
+                  Sync loads up to 100 recent emails from the last 30 days.
+                </p>
+                <a
+                  href="/api/gmail/connect"
+                  className={`mb-2 block text-xs text-primary ${reconnect ? "rounded border border-primary p-2 font-semibold" : ""}`}
+                >
+                  {reconnect
+                    ? "Reconnect Gmail — mailbox permission required"
+                    : "Update Gmail permissions"}
+                </a>
+              </>
+            ) : null}
             {inbox.isSuccess && connected ? (
               <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-muted px-2 py-1.5 text-[11px] text-muted-foreground">
                 <span className="truncate">Gmail: {inbox.data.email}</span>
@@ -182,7 +311,7 @@ function InboxPage() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className={`truncate text-sm ${unread ? "font-semibold" : ""}`}>
-                      {m.fromName}
+                      {folder === "sent" ? `To: ${m.toEmails}` : m.fromName}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
                       {formatTime(m.receivedAt)}
@@ -220,13 +349,84 @@ function InboxPage() {
                 {emails.length === 0
                   ? syncing
                     ? "Fetching your emails…"
-                    : "No emails yet. Press Sync to fetch the last 30 days."
+                    : "No emails in this folder. Press Sync to refresh."
                   : "No emails match your search."}
               </div>
             ) : null}
           </div>
         </div>
-        {selected ? (
+        {composing ? (
+          <div className="min-w-0 flex-1 p-4 sm:p-6">
+            <form
+              onSubmit={(event) => void submitCompose(event)}
+              className="mx-auto max-w-3xl space-y-4 rounded-lg border bg-card p-5"
+            >
+              <h2 className="text-xl font-semibold">New email</h2>
+              <label className="block text-sm">
+                To
+                <input
+                  type="email"
+                  required
+                  value={to}
+                  onChange={(event) => setTo(event.target.value)}
+                  className="mt-1 block w-full rounded-md border bg-background p-2"
+                />
+              </label>
+              <label className="block text-sm">
+                Subject
+                <input
+                  required
+                  maxLength={300}
+                  value={subject}
+                  onChange={(event) => setSubject(event.target.value)}
+                  className="mt-1 block w-full rounded-md border bg-background p-2"
+                />
+              </label>
+              <label className="block text-sm">
+                Repair request (optional)
+                <select
+                  value={requestId}
+                  onChange={(event) => setRequestId(event.target.value)}
+                  className="mt-1 block w-full rounded-md border bg-background p-2"
+                >
+                  <option value="">No linked request</option>
+                  {requests.map((request) => (
+                    <option key={request.id} value={request.id}>
+                      {request.id} — {request.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                Message
+                <textarea
+                  required
+                  maxLength={20000}
+                  value={body}
+                  onChange={(event) => setBody(event.target.value)}
+                  className="mt-1 block min-h-64 w-full rounded-md border bg-background p-3"
+                />
+              </label>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={() => setComposing(false)}
+                  className="rounded-md border px-4 py-2 text-sm"
+                >
+                  Close draft
+                </button>
+                <button
+                  disabled={sending || !to.trim() || !subject.trim() || !body.trim()}
+                  className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+                >
+                  <Send className="h-4 w-4" />
+                  {sending ? "Sending…" : "Send email"}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : selected ? (
           <>
             <div className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
               <button
@@ -242,6 +442,21 @@ function InboxPage() {
                   Email · {new Date(selected.receivedAt).toLocaleString()}
                 </div>
                 <h2 className="mt-2 text-xl font-semibold">{selected.subject}</h2>
+                <div className="mt-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span className="break-all">To: {selected.toEmails}</span>
+                  <button
+                    disabled={moving}
+                    onClick={() => void moveSelected()}
+                    className="flex shrink-0 items-center gap-1 rounded-md border px-3 py-2 text-foreground disabled:opacity-50"
+                  >
+                    {selected.trashed ? (
+                      <Undo2 className="h-4 w-4" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                    {moving ? "Moving…" : selected.trashed ? "Restore" : "Move to Trash"}
+                  </button>
+                </div>
                 <div className="mt-3 flex items-center gap-3 border-b pb-4">
                   <div className="grid h-9 w-9 place-items-center rounded-full bg-muted text-xs font-semibold">
                     {selected.fromName
@@ -257,7 +472,7 @@ function InboxPage() {
                   </div>
                 </div>
                 <p className="whitespace-pre-wrap break-words py-6 text-[15px]">{selected.body}</p>
-                {replying ? (
+                {selected.trashed || selected.sent ? null : replying ? (
                   <form onSubmit={(e) => void submitReply(e)}>
                     <textarea
                       autoFocus

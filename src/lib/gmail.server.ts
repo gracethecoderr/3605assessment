@@ -2,8 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { emailMessages, gmailAccounts, repairRequests, requestParticipants } from "@/db/schema";
 import { getDb } from "./db.server";
 
-export const GMAIL_SCOPES =
-  "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
+export const GMAIL_SCOPES = "openid email https://www.googleapis.com/auth/gmail.modify";
 
 // Endpoints can be redirected (for example to a local fake Google server in tests).
 const GOOGLE_TOKEN_URL = () =>
@@ -200,6 +199,9 @@ function parseMessage(userId: string, m: GmailMessage) {
     body,
     receivedAt: Number(m.internalDate ?? Date.now()),
     unread: m.labelIds?.includes("UNREAD") ?? false,
+    inInbox: m.labelIds?.includes("INBOX") ?? false,
+    sent: m.labelIds?.includes("SENT") ?? false,
+    trashed: m.labelIds?.includes("TRASH") ?? false,
   };
 }
 
@@ -217,8 +219,8 @@ export async function syncInbox(userId: string, origin: string) {
   const token = await accessToken(userId, origin);
   const headers = { Authorization: `Bearer ${token}` };
   const list = await fetch(
-    `${GMAIL_API()}/gmail/v1/users/me/messages?maxResults=30&q=` +
-      encodeURIComponent("(in:inbox OR in:sent) newer_than:30d"),
+    `${GMAIL_API()}/gmail/v1/users/me/messages?maxResults=100&includeSpamTrash=true&q=` +
+      encodeURIComponent("(in:inbox OR in:sent OR in:trash) newer_than:30d"),
     { headers },
   );
   if (!list.ok) throw new Error(`Gmail list failed (${list.status})`);
@@ -242,7 +244,7 @@ export async function syncInbox(userId: string, origin: string) {
       .values(row)
       .onConflictDoUpdate({
         target: [emailMessages.userId, emailMessages.id],
-        set: { unread: row.unread },
+        set: { unread: row.unread, inInbox: row.inInbox, sent: row.sent, trashed: row.trashed },
       });
   }
   await db
@@ -307,6 +309,14 @@ export async function sendMail(
   const [account] = await db.select().from(gmailAccounts).where(eq(gmailAccounts.userId, userId));
   if (!account) throw new ReconnectRequired("Gmail is not connected");
 
+  if (input.requestId) {
+    const [request] = await db
+      .select({ id: repairRequests.id })
+      .from(repairRequests)
+      .where(and(eq(repairRequests.userId, userId), eq(repairRequests.id, input.requestId)));
+    if (!request) throw new Error("Repair request not found");
+  }
+
   const to = cleanHeader(input.to);
   const subject = cleanHeader(input.subject);
   const encodedSubject = /^[\x20-\x7e]*$/.test(subject)
@@ -358,8 +368,46 @@ export async function sendMail(
       body: input.body.slice(0, 20000),
       receivedAt: Date.now(),
       unread: false,
+      inInbox: false,
+      sent: true,
+      trashed: false,
       requestId: input.requestId,
     })
     .onConflictDoNothing();
   if (!input.requestId) await autoLinkEmails(userId);
+}
+
+export async function moveMail(userId: string, origin: string, id: string, trash: boolean) {
+  const db = await getDb();
+  const condition = and(eq(emailMessages.userId, userId), eq(emailMessages.id, id));
+  const [mail] = await db.select().from(emailMessages).where(condition);
+  if (!mail) throw new Error("Email not found");
+  let labels: string[] | undefined;
+  if (!(await isDemoAccount(userId))) {
+    const token = await accessToken(userId, origin);
+    const response = await fetch(
+      `${GMAIL_API()}/gmail/v1/users/me/messages/${encodeURIComponent(id)}/${trash ? "trash" : "untrash"}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    if (response.status === 403 || response.status === 401)
+      throw new ReconnectRequired("Reconnect Gmail to allow moving emails");
+    if (!response.ok) throw new Error(`Gmail move failed (${response.status})`);
+    labels = ((await response.json()) as { labelIds?: string[] }).labelIds;
+  }
+  await db
+    .update(emailMessages)
+    .set({
+      trashed: trash,
+      ...(labels
+        ? {
+            inInbox: labels.includes("INBOX"),
+            sent: labels.includes("SENT"),
+            unread: labels.includes("UNREAD"),
+          }
+        : {}),
+    })
+    .where(condition);
 }

@@ -148,6 +148,9 @@ beforeEach(() => {
           ? json({ id: "sent-1", threadId: "thread-m1" })
           : json({}, sendStatus);
       }
+      if (/\/messages\/m1\/(trash|untrash)$/.test(url)) {
+        return json({ labelIds: url.endsWith("/untrash") ? ["INBOX"] : ["TRASH"] });
+      }
       const m = /messages\/([^?]+)\?format=full/.exec(url);
       const found = mailbox.find((x) => x.id === m?.[1]);
       return found ? json(found) : json({}, 404);
@@ -232,6 +235,23 @@ describe("Gmail sync, linking and sending", () => {
     expect(byId["m2"]?.toEmails).toBe("jobs@iwp.test");
     expect(byId["m4"]?.unread).toBe(true);
     expect(byId["m1"]?.body).toBe("Tap is dripping");
+  });
+
+  it("moves mail to Gmail trash and restores it without losing request links", async () => {
+    const gmail = await import("@/lib/gmail.server");
+    await gmail.moveMail(USER, "https://app.test", "m1", true);
+    const read = async () =>
+      (
+        await db
+          .select()
+          .from(schema.emailMessages)
+          .where(and(eq(schema.emailMessages.userId, USER), eq(schema.emailMessages.id, "m1")))
+      )[0];
+    expect((await read())?.trashed).toBe(true);
+    expect((await read())?.requestId).toBe("REQ-1");
+    await gmail.moveMail(USER, "https://app.test", "m1", false);
+    expect((await read())?.trashed).toBe(false);
+    expect((await read())?.inInbox).toBe(true);
   });
 
   it("does not link emails to a request when the sender is not a participant", async () => {
@@ -342,5 +362,23 @@ describe("Demo account", () => {
       );
     expect(row?.requestId).toBe("REQ-101");
     expect(row?.fromEmail).toBe("sarah.miller@harbourrealty.example");
+    expect(row?.sent).toBe(true);
+    expect(row?.inInbox).toBe(false);
+    await gmail.moveMail(DEMO, "https://app.test", row!.id, true);
+    const [trashed] = await db
+      .select()
+      .from(schema.emailMessages)
+      .where(and(eq(schema.emailMessages.userId, DEMO), eq(schema.emailMessages.id, row!.id)));
+    expect(trashed?.trashed).toBe(true);
+    await gmail.moveMail(DEMO, "https://app.test", row!.id, false);
+    const [restored] = await db
+      .select()
+      .from(schema.emailMessages)
+      .where(and(eq(schema.emailMessages.userId, DEMO), eq(schema.emailMessages.id, row!.id)));
+    expect(restored?.trashed).toBe(false);
+    await expect(gmail.moveMail(USER, "https://app.test", row!.id, true)).rejects.toThrow(
+      "Email not found",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
